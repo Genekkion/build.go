@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"testing"
 
-	"build/internal/test"
+	"github.com/Genekkion/build.go/internal/test"
 )
 
 func TestGetSetHash(t *testing.T) {

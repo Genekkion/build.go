@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"build/v1"
+	"github.com/Genekkion/build.go/v1"
 )
 
 // GoCmd represents a go command.

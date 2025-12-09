@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"build/internal/test"
+	"github.com/Genekkion/build.go/internal/test"
 )
 
 func Test_NewSet(t *testing.T) {
