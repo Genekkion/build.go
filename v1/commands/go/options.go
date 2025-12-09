@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/Genekkion/build/v1"
+	"github.com/Genekkion/build.go/v1"
 )
 
 // Config represents the configuration.

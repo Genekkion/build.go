@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/Genekkion/build/internal/db"
-	"github.com/Genekkion/build/internal/log/slog"
+	"github.com/Genekkion/build.go/internal/db"
+	"github.com/Genekkion/build.go/internal/log/slog"
 )
 
 var (

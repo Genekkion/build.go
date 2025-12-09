@@ -1,4 +1,4 @@
-module github.com/Genekkion/build
+module github.com/Genekkion/build.go
 
 go 1.25.5
 

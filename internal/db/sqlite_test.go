@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Genekkion/build/internal/test"
+	"github.com/Genekkion/build.go/internal/test"
 )
 
 var testCounter = atomic.Int32{}
