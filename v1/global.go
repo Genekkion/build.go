@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 
-	"build/internal/db"
-	"build/internal/log/slog"
+	"github.com/Genekkion/build/internal/db"
+	"github.com/Genekkion/build/internal/log/slog"
 )
 
 var (
