@@ -1,0 +1,20 @@
+project_name: build.go
+
+builds: [ ]
+
+release:
+  prerelease: auto
+
+archives:
+  - id: docs
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+
+sboms:
+  - id: lib
+    artifacts: [ "checksum" ]
