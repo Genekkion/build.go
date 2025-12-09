@@ -59,4 +59,4 @@ func main() {
 
 ## Example
 
-Further examples can be found in the `examples` director.
+Further examples can be found in the `examples` directory.
