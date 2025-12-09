@@ -1,14 +1,14 @@
 version: 2
 project_name: build.go
 
-builds: [ ]
+builds:
+  - skip: true
 
 release:
   prerelease: auto
 
 archives:
   - id: docs
-    format: tar.gz
     files:
       - LICENSE
       - README.md
@@ -18,4 +18,3 @@ checksum:
 
 sboms:
   - id: lib
-    artifacts: [ "checksum" ]
