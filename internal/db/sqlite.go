@@ -8,10 +8,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var (
-	//go:embed schema.sql
-	schemaSQL string
-)
+//go:embed schema.sql
+var schemaSQL string
 
 // New creates a new sqlite database at the given path.
 func New(fp string) (db *sql.DB, err error) {
