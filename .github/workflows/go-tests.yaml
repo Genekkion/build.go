@@ -6,6 +6,7 @@ on:
     paths:
       - "cmd/**"
       - "internal/**"
+      - "v1/**"
 
 jobs:
   test:
@@ -36,5 +37,8 @@ jobs:
       - name: Install dependencies
         run: go mod tidy
 
-      - name: Run tests
+      - name: Run tests (internal)
         run: go test ./internal/...
+
+      - name: Run tests (v1)
+        run: go test ./v1/...
