@@ -57,6 +57,14 @@ func main() {
 }
 ```
 
+Note: This `main` function does not replace your actual program's `main` function, but is instead a separate script to be ran, e.g. `go run scripts/build.go` or something similar.
+
 ## Example
 
 Further examples can be found in the `examples` directory.
+
+## Motivation
+
+The main reason I built this library was so that I could well, define build dependencies in a language more familar to me, `Go`, rather than use something like a Makefile or `.sh` script which I am 1. not as familar with, and 2. is more complicated in my opinion.
+
+Instead, by writing it in `Go`, I understand what is going on behind the scenes and can optimise it for my usage.
