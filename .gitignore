@@ -4,3 +4,4 @@ bin/
 scratch
 key
 *.db
+.gobuild

@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"greddit/internal/test"
+	"build/internal/test"
 )
 
 func Test_NewSet(t *testing.T) {
