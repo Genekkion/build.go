@@ -24,9 +24,9 @@ commands, and a special `Go` command for running `go` commands.
 package main
 
 import (
-    "context"
+	"context"
 	buildgo "github.com/Genekkion/build.go/v1"
-	"github.com/Genekkion/build.go/v1/commands/generic"
+	"github.com/Genekkion/build.go/v1/commands/shell"
 )
 
 func main() {
@@ -36,24 +36,30 @@ func main() {
 	buildgo.Setup()
 	defer buildgo.Cleanup()
 
-	cmd := generic.NewCmd([]string{
-        "echo", "First step!"
-    })
-    firstStep := buildgo.NewStep("firstStep", cmd)
-    
-    cmd = generic.NewCmd([]string{
-        "echo", "Second step!"
-    })
-    secondStep := buildgo.NewStep("secondStep", cmd)
-    
-    secondStep.DependsOn(firstStep)
-    
-    // By calling the `Run` method on the second step here, it will
-    // see that it is dependent on the first step, and will run it first.
-    err := secondStep.Run(context.Background())
+	cmd, err := shell.NewCmd([]string{
+		"echo", "First step!",
+	})
     if err != nil {
         panic(err)
     }
+	firstStep := buildgo.NewStep("firstStep", cmd)
+
+	cmd, err = shell.NewCmd([]string{
+		"echo", "Second step!"
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	secondStep := buildgo.NewStep("secondStep", cmd)
+
+	secondStep.DependsOn(firstStep)
+
+	// By calling the `Run` method on the second step here, it will
+	// see that it is dependent on the first step, and will run it first.
+	err = secondStep.Run(context.Background())
+	if err != nil { panic(err)
+	}
 }
 ```
 
