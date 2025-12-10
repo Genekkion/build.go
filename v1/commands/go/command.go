@@ -18,8 +18,54 @@ type GoCmd struct {
 	args    []string
 }
 
+// NewBuildCmd creates a new go build command.
+func NewBuildCmd(cwd string, targets []string, args []string, opts ...Option) (cmd *GoCmd, err error) {
+	cmd, err = newCmd(cwd, targets, args, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	buildgo.Logger.Debug("Go build command created",
+		"compilerPath", cmd.cfg.compilerPath,
+		"cwd", cmd.cwd,
+		"targets", cmd.targets,
+		"args", cmd.args,
+	)
+
+	args = append([]string{
+		cmd.cfg.compilerPath, "build",
+	}, cmd.targets...)
+	args = append(args, cmd.args...)
+	cmd.args = args
+
+	return cmd, nil
+}
+
 // NewRunCmd creates a new go run command.
 func NewRunCmd(cwd string, targets []string, args []string, opts ...Option) (cmd *GoCmd, err error) {
+	cmd, err = newCmd(cwd, targets, args, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	buildgo.Logger.Debug("Go run command created",
+		"compilerPath", cmd.cfg.compilerPath,
+		"cwd", cmd.cwd,
+		"targets", cmd.targets,
+		"args", cmd.args,
+	)
+
+	args = append([]string{
+		cmd.cfg.compilerPath, "run",
+	}, cmd.targets...)
+	args = append(args, cmd.args...)
+	cmd.args = args
+
+	return cmd, nil
+}
+
+// newCmd creates a new go command.
+func newCmd(cwd string, targets []string, args []string, opts ...Option) (cmd *GoCmd, err error) {
 	if len(targets) == 0 {
 		return nil, errors.New("target is required")
 	}
@@ -33,12 +79,6 @@ func NewRunCmd(cwd string, targets []string, args []string, opts ...Option) (cmd
 	for _, opt := range opts {
 		opt(&cmd.cfg)
 	}
-	buildgo.Logger.Debug("Go run command created",
-		"compilerPath", cmd.cfg.compilerPath,
-		"cwd", cmd.cwd,
-		"targets", cmd.targets,
-		"args", cmd.args,
-	)
 
 	err = cmd.setupTargets()
 	if err != nil {
