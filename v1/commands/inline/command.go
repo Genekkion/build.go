@@ -1,13 +1,14 @@
 package inline
 
 import (
+	"context"
 	"errors"
 
 	buildgo "github.com/Genekkion/build.go/v1"
 )
 
 // CmdFunc represents a command function.
-type CmdFunc func() error
+type CmdFunc func(ctx context.Context) error
 
 // Cmd represents a command.
 type Cmd struct {
@@ -26,9 +27,9 @@ func NewCmd(funcs []CmdFunc) (cmd *Cmd, err error) {
 }
 
 // Run runs the command.
-func (c Cmd) Run() error {
+func (c Cmd) Run(ctx context.Context) error {
 	for _, f := range c.funcs {
-		err := f()
+		err := f(ctx)
 		if err != nil {
 			buildgo.Logger.Error("Command failed",
 				"error", err,
