@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/Genekkion/build.go/v1"
+	buildgo "github.com/Genekkion/build.go/v1"
 )
 
 // GoCmd represents a go command.
@@ -33,7 +33,7 @@ func NewRunCmd(cwd string, targets []string, args []string, opts ...Option) (cmd
 	for _, opt := range opts {
 		opt(&cmd.cfg)
 	}
-	build.Logger.Debug("Go run command created",
+	buildgo.Logger.Debug("Go run command created",
 		"compilerPath", cmd.cfg.compilerPath,
 		"cwd", cmd.cwd,
 		"targets", cmd.targets,
@@ -89,7 +89,7 @@ func (c GoCmd) Run(ctx context.Context) error {
 		c.cfg.compilerPath, "run",
 	}, c.targets...)
 	args = append(args, c.args...)
-	build.Logger.Debug("Running go command",
+	buildgo.Logger.Debug("Running go command",
 		"cwd", c.cwd,
 		"args", args,
 	)
