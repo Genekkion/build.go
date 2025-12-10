@@ -4,38 +4,38 @@ import (
 	"context"
 	"path/filepath"
 
-	"build/v1"
-	"build/v1/commands/generic"
-	cmdgo "build/v1/commands/go"
+	buildgo "github.com/Genekkion/build.go/v1"
+	"github.com/Genekkion/build.go/v1/commands/generic"
+	cmdgo "github.com/Genekkion/build.go/v1/commands/go"
 )
 
 func main() {
-	build.Setup()
-	defer build.Cleanup()
+	buildgo.Setup()
+	defer buildgo.Cleanup()
 
 	fp, err := filepath.Abs(".")
 	if err != nil {
 		panic(err)
 	}
 
-	var firstStep *build.Step
+	var firstStep *buildgo.Step
 	{
 		cmd, err := cmdgo.NewRunCmd(fp, []string{"read_file"}, nil)
 		if err != nil {
 			panic(err)
 		}
-		firstStep = build.NewStep("First step", cmd)
+		firstStep = buildgo.NewStep("First step", cmd)
 		firstStep.AddFileDeps("read_file/file.txt")
 	}
 
-	var second *build.Step
+	var second *buildgo.Step
 	{
 		cmd := generic.NewCmd([]string{"echo", "second step"})
 		if err != nil {
 			panic(err)
 		}
 
-		second = build.NewStep("Second step", cmd)
+		second = buildgo.NewStep("Second step", cmd)
 		second.DependsOn(firstStep)
 	}
 

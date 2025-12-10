@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/Genekkion/build.go/v1"
+	buildgo "github.com/Genekkion/build.go/v1"
 )
 
 // Config represents the configuration.
@@ -17,7 +17,7 @@ func defaultConfig() Config {
 	compilerPath, err := exec.LookPath("go")
 	if err != nil {
 		compilerPath = "go"
-		build.Logger.Warn(
+		buildgo.Logger.Warn(
 			fmt.Sprintf(
 				"Unable to find default go compiler, resort to using \"%s\"",
 				compilerPath,

@@ -25,7 +25,7 @@ package main
 
 import (
     "context"
-	build "github.com/Genekkion/build.go/v1"
+	buildgo "github.com/Genekkion/build.go/v1"
 	"github.com/Genekkion/build.go/v1/commands/generic"
 )
 
@@ -33,18 +33,18 @@ func main() {
 	// These two functions are for setting up and tearing down the build system.
 	// It handles cache-related things like setting up of the cache directory and db.
 	// By default, it will use "./.gobuild" as the cache directory.
-	build.Setup()
-	defer build.Cleanup()
+	buildgo.Setup()
+	defer buildgo.Cleanup()
 
 	cmd := generic.NewCmd([]string{
         "echo", "First step!"
     })
-    firstStep := build.NewStep("firstStep", cmd)
+    firstStep := buildgo.NewStep("firstStep", cmd)
     
     cmd = generic.NewCmd([]string{
         "echo", "Second step!"
     })
-    secondStep := build.NewStep("secondStep", cmd)
+    secondStep := buildgo.NewStep("secondStep", cmd)
     
     secondStep.DependsOn(firstStep)
     
