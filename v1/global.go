@@ -1,4 +1,4 @@
-package build
+package buildgo
 
 import (
 	"crypto/sha256"
