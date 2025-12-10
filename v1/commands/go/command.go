@@ -64,6 +64,29 @@ func NewRunCmd(cwd string, targets []string, args []string, opts ...Option) (cmd
 	return cmd, nil
 }
 
+// NewTestCmd creates a new go test command.
+func NewTestCmd(cwd string, targets []string, args []string, opts ...Option) (cmd *GoCmd, err error) {
+	cmd, err = newCmd(cwd, targets, args, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	buildgo.Logger.Debug("Go test command created",
+		"compilerPath", cmd.cfg.compilerPath,
+		"cwd", cmd.cwd,
+		"targets", cmd.targets,
+		"args", cmd.args,
+	)
+
+	args = append([]string{
+		cmd.cfg.compilerPath, "test",
+	}, cmd.targets...)
+	args = append(args, cmd.args...)
+	cmd.args = args
+
+	return cmd, nil
+}
+
 // newCmd creates a new go command.
 func newCmd(cwd string, targets []string, args []string, opts ...Option) (cmd *GoCmd, err error) {
 	if len(targets) == 0 {
