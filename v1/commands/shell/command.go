@@ -1,7 +1,8 @@
-package generic
+package shell
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 )
 
@@ -13,17 +14,20 @@ type Cmd struct {
 }
 
 // NewCmd creates a new generic command.
-func NewCmd(args []string, opts ...Option) Cmd {
+func NewCmd(args []string, opts ...Option) (cmd *Cmd, err error) {
+	if len(args) == 0 {
+		return nil, errors.New("at least 1 argument is required")
+	}
 	cfg := defaultConfig()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
-	return Cmd{
+	return &Cmd{
 		cfg:  cfg,
 		cmd:  args[0],
 		args: args[1:],
-	}
+	}, nil
 }
 
 // Run runs the command.
