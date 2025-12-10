@@ -149,10 +149,7 @@ func (c *GoCmd) setupTargets() (err error) {
 
 // Run runs the go command.
 func (c GoCmd) Run(ctx context.Context) error {
-	args := append([]string{
-		c.cfg.compilerPath, "run",
-	}, c.targets...)
-	args = append(args, c.args...)
+	args := c.args
 	buildgo.Logger.Debug("Running go command",
 		"cwd", c.cwd,
 		"args", args,

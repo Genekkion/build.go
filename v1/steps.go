@@ -114,6 +114,10 @@ func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
 
 // Run runs the step.
 func (s *Step) Run(ctx context.Context) (err error) {
+	if s.Done() {
+		return nil
+	}
+
 	for _, dep := range s.dependsOn {
 		if dep.Done() {
 			continue
@@ -141,16 +145,12 @@ func (s *Step) Run(ctx context.Context) (err error) {
 	for _, cmd := range s.commands {
 		err = cmd.Run(ctx)
 		if err != nil {
-			break
+			Logger.Error("Step failed",
+				"step", s.name,
+				"error", err,
+			)
+			return err
 		}
-	}
-
-	if err != nil {
-		Logger.Error("Step failed",
-			"step", s.name,
-			"error", err,
-		)
-		return err
 	}
 
 	Logger.Info("Step completed", "step", s.name)

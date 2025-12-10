@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+
+	buildgo "github.com/Genekkion/build.go/v1"
 )
 
 // Cmd represents a generic command.
@@ -32,6 +34,12 @@ func NewCmd(args []string, opts ...Option) (cmd *Cmd, err error) {
 
 // Run runs the command.
 func (c Cmd) Run(ctx context.Context) (err error) {
+	buildgo.Logger.Debug("Running shell command",
+		"cwd", c.cfg.cwd,
+		"cmd", c.cmd,
+		"args", c.args,
+	)
+
 	cmd := exec.CommandContext(ctx, c.cmd, c.args...)
 	cmd.Dir = c.cfg.cwd
 	cmd.Stdout = c.cfg.stdout
