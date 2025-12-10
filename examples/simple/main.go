@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 
 	buildgo "github.com/Genekkion/build.go/v1"
-	"github.com/Genekkion/build.go/v1/commands/generic"
 	cmdgo "github.com/Genekkion/build.go/v1/commands/go"
+	"github.com/Genekkion/build.go/v1/commands/shell"
 )
 
 func main() {
@@ -30,7 +30,7 @@ func main() {
 
 	var second *buildgo.Step
 	{
-		cmd := generic.NewCmd([]string{"echo", "second step"})
+		cmd, err := shell.NewCmd([]string{"echo", "second step"})
 		if err != nil {
 			panic(err)
 		}
