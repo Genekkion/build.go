@@ -45,7 +45,7 @@ func main() {
 	firstStep := buildgo.NewStep("firstStep", cmd)
 
 	cmd, err = shell.NewCmd([]string{
-		"echo", "Second step!"
+		"echo", "Second step!",
 	})
 	if err != nil {
 		panic(err)
