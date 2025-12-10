@@ -34,8 +34,8 @@ func NewBuildCmd(cwd string, targets []string, args []string, opts ...Option) (c
 
 	args = append([]string{
 		cmd.cfg.compilerPath, "build",
-	}, cmd.targets...)
-	args = append(args, cmd.args...)
+	}, cmd.args...)
+	args = append(args, cmd.targets...)
 	cmd.args = args
 
 	return cmd, nil
@@ -57,8 +57,9 @@ func NewRunCmd(cwd string, targets []string, args []string, opts ...Option) (cmd
 
 	args = append([]string{
 		cmd.cfg.compilerPath, "run",
-	}, cmd.targets...)
-	args = append(args, cmd.args...)
+	}, cmd.args...,
+	)
+	args = append(args, cmd.targets...)
 	cmd.args = args
 
 	return cmd, nil
@@ -80,8 +81,8 @@ func NewTestCmd(cwd string, targets []string, args []string, opts ...Option) (cm
 
 	args = append([]string{
 		cmd.cfg.compilerPath, "test",
-	}, cmd.targets...)
-	args = append(args, cmd.args...)
+	}, cmd.args...)
+	args = append(args, cmd.targets...)
 	cmd.args = args
 
 	return cmd, nil
