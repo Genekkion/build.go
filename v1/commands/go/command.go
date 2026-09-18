@@ -3,9 +3,9 @@ package cmdgo
 import (
 	"context"
 	"errors"
-	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	buildgo "github.com/Genekkion/build.go/v1"
 )
@@ -112,39 +112,25 @@ func newCmd(cwd string, targets []string, args []string, opts ...Option) (cmd *G
 	return cmd, nil
 }
 
-// setupTargets recursively collects all files in the target directory. Warning: if the target is a directory, it cannot
-// have any other targets apart from the directory itself.
-func (c *GoCmd) setupTargets() (err error) {
-	for _, target := range c.targets {
-		stat, err := os.Stat(target)
-		if err != nil {
-			return err
-		} else if !stat.IsDir() {
+// setupTargets normalizes relative target paths for the go toolchain.
+func (c *GoCmd) setupTargets() error {
+	for i, target := range c.targets {
+		if target == "." || target == "..." || strings.HasPrefix(target, "./") || strings.HasPrefix(target, "../") || filepath.IsAbs(target) {
 			continue
 		}
-
-		// target is a directory
-		if len(c.targets) != 1 {
-			return errors.New("directory target must have exactly one argument")
-		}
-
-		files, err := os.ReadDir(target)
-		if err != nil {
-			return err
-		}
-
-		c.targets = make([]string, 0, len(files))
-		for _, file := range files {
-			if file.IsDir() {
-				continue
-			}
-
-			c.targets = append(c.targets, filepath.Join(target, file.Name()))
-		}
-		return nil
+		c.targets[i] = "." + string(filepath.Separator) + target
 	}
-
 	return nil
+}
+
+// Targets returns the command targets.
+func (c *GoCmd) Targets() []string {
+	return c.targets
+}
+
+// Args returns the full command arguments.
+func (c *GoCmd) Args() []string {
+	return c.args
 }
 
 // Run runs the go command.
@@ -157,8 +143,8 @@ func (c GoCmd) Run(ctx context.Context) error {
 
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = c.cwd
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = c.cfg.stdout
+	cmd.Stderr = c.cfg.stderr
 
 	return cmd.Run()
 }
