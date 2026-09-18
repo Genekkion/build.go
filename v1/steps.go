@@ -2,7 +2,9 @@ package buildgo
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 )
 
@@ -108,12 +110,61 @@ func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
 		}
 	}
 
-	s.done.Store(len(toSet) == 0)
 	return toSet, nil
 }
 
-// Run runs the step.
-func (s *Step) Run(ctx context.Context) (err error) {
+// CheckCycles verifies that there are no circular dependencies reachable from this step.
+func (s *Step) CheckCycles() error {
+	state := make(map[*Step]int) // 0: unvisited, 1: visiting, 2: visited
+	var path []*Step
+
+	var dfs func(curr *Step) error
+	dfs = func(curr *Step) error {
+		switch state[curr] {
+		case 1:
+			cycleStart := 0
+			for i, node := range path {
+				if node == curr {
+					cycleStart = i
+					break
+				}
+			}
+			var cycleNames []string
+			for _, node := range path[cycleStart:] {
+				cycleNames = append(cycleNames, node.name)
+			}
+			cycleNames = append(cycleNames, curr.name)
+			return fmt.Errorf("dependency cycle detected: %s", strings.Join(cycleNames, " -> "))
+		case 2:
+			return nil
+		}
+
+		state[curr] = 1
+		path = append(path, curr)
+
+		for _, dep := range curr.dependsOn {
+			if err := dfs(dep); err != nil {
+				return err
+			}
+		}
+
+		path = path[:len(path)-1]
+		state[curr] = 2
+		return nil
+	}
+
+	return dfs(s)
+}
+
+// Run runs the step and all its dependencies after verifying the graph has no cycles.
+func (s *Step) Run(ctx context.Context) error {
+	if err := s.CheckCycles(); err != nil {
+		return err
+	}
+	return s.run(ctx)
+}
+
+func (s *Step) run(ctx context.Context) (err error) {
 	if s.Done() {
 		return nil
 	}
@@ -123,7 +174,7 @@ func (s *Step) Run(ctx context.Context) (err error) {
 			continue
 		}
 
-		err = dep.Run(ctx)
+		err = dep.run(ctx)
 		if err != nil {
 			return err
 		}

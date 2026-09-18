@@ -3,6 +3,7 @@ package buildgo_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -236,4 +237,83 @@ func TestStepScopedCacheIsolation(t *testing.T) {
 		t.Fatalf("expected both to skip, got A=%d, B=%d", runCountA.Load(), runCountB.Load())
 	}
 }
+
+func TestStepCycleDetection(t *testing.T) {
+	setupTestEnv(t)
+
+	noop, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { return nil }})
+
+	t.Run("self-cycle", func(t *testing.T) {
+		stepA := buildgo.NewStep("A", noop)
+		stepA.DependsOn(stepA)
+
+		err := stepA.Run(context.Background())
+		if err == nil {
+			t.Fatal("expected cycle error, got nil")
+		}
+		if !strings.Contains(err.Error(), "dependency cycle detected: A -> A") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("two-step cycle", func(t *testing.T) {
+		stepA := buildgo.NewStep("A", noop)
+		stepB := buildgo.NewStep("B", noop)
+		stepA.DependsOn(stepB)
+		stepB.DependsOn(stepA)
+
+		err := stepA.Run(context.Background())
+		if err == nil {
+			t.Fatal("expected cycle error, got nil")
+		}
+		if !strings.Contains(err.Error(), "dependency cycle detected") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("three-step cycle", func(t *testing.T) {
+		stepA := buildgo.NewStep("A", noop)
+		stepB := buildgo.NewStep("B", noop)
+		stepC := buildgo.NewStep("C", noop)
+		stepA.DependsOn(stepB)
+		stepB.DependsOn(stepC)
+		stepC.DependsOn(stepA)
+
+		err := stepA.Run(context.Background())
+		if err == nil {
+			t.Fatal("expected cycle error, got nil")
+		}
+		if !strings.Contains(err.Error(), "dependency cycle detected: A -> B -> C -> A") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+}
+
+func TestStepDiamondDependency(t *testing.T) {
+	setupTestEnv(t)
+
+	var runCountA, runCountB, runCountC, runCountD atomic.Int32
+
+	cmdA, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { runCountA.Add(1); return nil }})
+	cmdB, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { runCountB.Add(1); return nil }})
+	cmdC, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { runCountC.Add(1); return nil }})
+	cmdD, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { runCountD.Add(1); return nil }})
+
+	stepA := buildgo.NewStep("A", cmdA)
+	stepB := buildgo.NewStep("B", cmdB).DependsOn(stepA)
+	stepC := buildgo.NewStep("C", cmdC).DependsOn(stepA)
+	stepD := buildgo.NewStep("D", cmdD).DependsOn(stepB, stepC)
+
+	err := stepD.Run(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error in diamond dependency: %v", err)
+	}
+
+	// Each step should run exactly once
+	if runCountA.Load() != 1 || runCountB.Load() != 1 || runCountC.Load() != 1 || runCountD.Load() != 1 {
+		t.Fatalf("expected each step to run once, got A=%d, B=%d, C=%d, D=%d",
+			runCountA.Load(), runCountB.Load(), runCountC.Load(), runCountD.Load())
+	}
+}
+
 
