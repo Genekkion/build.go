@@ -3,14 +3,17 @@ package buildgo
 import (
 	"crypto/sha256"
 	"database/sql"
+	"fmt"
 	"io"
 	slog2 "log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 
 	"github.com/Genekkion/build.go/internal/db"
 	"github.com/Genekkion/build.go/internal/log/slog"
+	"github.com/Genekkion/build.go/internal/vfs"
 )
 
 var (
@@ -21,19 +24,77 @@ var (
 			}),
 		)
 	}()
-	CacheDir string
-	CacheDb  *sql.DB
-	Hasher   = sha256.New
+	CacheDir     string
+	CacheDb      *sql.DB
+	Hasher       = sha256.New
+	CurrentFS    vfs.FS = vfs.NewOSFS()
+	memDBCounter atomic.Int64
 )
 
-// Setup sets up the global variables.
-// Warning: will panic if unable to set up successfully.
-func Setup() {
-	var err error
+type setupConfig struct {
+	inMemory bool
+	db       *sql.DB
+	cacheDir string
+	fs       vfs.FS
+}
 
-	err = setupCache()
-	if err != nil {
-		panic(err)
+// SetupOption configures the build system during Setup.
+type SetupOption func(*setupConfig)
+
+// WithInMemoryDB configures SQLite to run purely in memory without disk access.
+func WithInMemoryDB() SetupOption {
+	return func(c *setupConfig) {
+		c.inMemory = true
+	}
+}
+
+// WithDB allows providing an existing database connection.
+func WithDB(database *sql.DB) SetupOption {
+	return func(c *setupConfig) {
+		c.db = database
+	}
+}
+
+// WithCacheDir overrides the default cache directory.
+func WithCacheDir(dir string) SetupOption {
+	return func(c *setupConfig) {
+		c.cacheDir = dir
+	}
+}
+
+// WithFS overrides the filesystem abstraction used for reading and globbing files.
+func WithFS(fileSystem vfs.FS) SetupOption {
+	return func(c *setupConfig) {
+		c.fs = fileSystem
+	}
+}
+
+// Setup sets up the global variables and database.
+// Warning: will panic if unable to set up successfully.
+func Setup(opts ...SetupOption) {
+	cfg := setupConfig{
+		fs: vfs.NewOSFS(),
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	CurrentFS = cfg.fs
+
+	var err error
+	if cfg.db != nil {
+		CacheDb = cfg.db
+	} else if cfg.inMemory {
+		dbName := fmt.Sprintf("file:buildgo_mem_%d?mode=memory&cache=shared", memDBCounter.Add(1))
+		CacheDb, err = db.New(dbName)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		err = setupCache(cfg.cacheDir)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	Logger.Debug("Setup complete",
@@ -41,14 +102,21 @@ func Setup() {
 	)
 }
 
-// Cleanup cleans up the global variables.
+// Cleanup cleans up the global database connection.
 func Cleanup() {
-	CacheDb.Close()
+	if CacheDb != nil {
+		_ = CacheDb.Close()
+		CacheDb = nil
+	}
+	CurrentFS = vfs.NewOSFS()
 }
 
 // setupCache sets up the cache directory and database.
-func setupCache() (err error) {
-	fp := filepath.Join(".", ".gobuild")
+func setupCache(customDir string) (err error) {
+	fp := customDir
+	if fp == "" {
+		fp = filepath.Join(".", ".gobuild")
+	}
 	fpAbs, err := filepath.Abs(fp)
 	if err != nil {
 		Logger.Warn("Unable to use absolute path for cache directory, using relative path instead",
@@ -89,7 +157,7 @@ func SetHash(fp string, h []byte) (err error) {
 func hashFile(fp string) (h []byte, err error) {
 	hs := Hasher()
 
-	f, err := os.Open(fp)
+	f, err := CurrentFS.Open(fp)
 	if err != nil {
 		return nil, err
 	}

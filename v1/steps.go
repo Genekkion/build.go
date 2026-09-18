@@ -87,7 +87,7 @@ func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
 	}
 
 	for _, fileDep := range s.fileDepsPatterns {
-		files, err := filepath.Glob(fileDep)
+		files, err := CurrentFS.Glob(fileDep)
 		if err != nil {
 			return nil, err
 		}
