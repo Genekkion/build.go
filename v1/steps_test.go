@@ -174,3 +174,66 @@ func TestStepMultipleFileDeps(t *testing.T) {
 		t.Fatalf("expected runCount 2 after modifying one dep, got %d", runCount.Load())
 	}
 }
+
+func TestStepScopedCacheIsolation(t *testing.T) {
+	memFS := setupTestEnv(t)
+
+	sharedFile := "/virtual/shared.txt"
+	if err := memFS.WriteFile(sharedFile, []byte("shared-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var runCountA, runCountB atomic.Int32
+	cmdA, err := inline.NewCmd([]inline.CmdFunc{
+		func(ctx context.Context) error {
+			runCountA.Add(1)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmdB, err := inline.NewCmd([]inline.CmdFunc{
+		func(ctx context.Context) error {
+			runCountB.Add(1)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stepA := buildgo.NewStep("stepA", cmdA).AddFileDeps(sharedFile)
+	stepB := buildgo.NewStep("stepB", cmdB).AddFileDeps(sharedFile)
+
+	// 1. Run stepA first
+	if err := stepA.Run(context.Background()); err != nil {
+		t.Fatalf("stepA run failed: %v", err)
+	}
+	if runCountA.Load() != 1 {
+		t.Fatalf("expected stepA runCount 1, got %d", runCountA.Load())
+	}
+
+	// 2. Run stepB: must run and NOT skip even though stepA cached sharedFile
+	if err := stepB.Run(context.Background()); err != nil {
+		t.Fatalf("stepB run failed: %v", err)
+	}
+	if runCountB.Load() != 1 {
+		t.Fatalf("expected stepB to run (not falsely skip due to stepA), got %d", runCountB.Load())
+	}
+
+	// 3. Re-running both without changes must skip both
+	stepA2 := buildgo.NewStep("stepA", cmdA).AddFileDeps(sharedFile)
+	stepB2 := buildgo.NewStep("stepB", cmdB).AddFileDeps(sharedFile)
+	if err := stepA2.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := stepB2.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runCountA.Load() != 1 || runCountB.Load() != 1 {
+		t.Fatalf("expected both to skip, got A=%d, B=%d", runCountA.Load(), runCountB.Load())
+	}
+}
+

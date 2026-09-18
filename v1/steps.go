@@ -98,7 +98,7 @@ func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
 		)
 
 		for _, fp := range files {
-			h, err := needsRebuild(fp)
+			h, err := needsRebuild(s.name, fp)
 			if err != nil {
 				return nil, err
 			}
@@ -157,7 +157,7 @@ func (s *Step) Run(ctx context.Context) (err error) {
 	s.done.Store(true)
 
 	for fp, h := range toSet {
-		err = SetHash(fp, h)
+		err = SetHash(s.name, fp, h)
 		if err != nil {
 			Logger.Error("Unable to update cache for file",
 				"file", fp,

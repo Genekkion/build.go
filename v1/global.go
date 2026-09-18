@@ -143,14 +143,14 @@ func setupCache(customDir string) (err error) {
 	return nil
 }
 
-// GetHash returns the hash for the given file path.
-func GetHash(fp string) (h []byte, err error) {
-	return db.GetHash(CacheDb, fp)
+// GetHash returns the hash for the given step name and file path.
+func GetHash(stepName string, fp string) (h []byte, err error) {
+	return db.GetHash(CacheDb, stepName, fp)
 }
 
-// SetHash sets the hash for the given file path.
-func SetHash(fp string, h []byte) (err error) {
-	return db.SetHash(CacheDb, fp, h)
+// SetHash sets the hash for the given step name and file path.
+func SetHash(stepName string, fp string, h []byte) (err error) {
+	return db.SetHash(CacheDb, stepName, fp, h)
 }
 
 // hashFile returns the hash of the file contents
@@ -185,13 +185,13 @@ func hashFile(fp string) (h []byte, err error) {
 
 // needsRebuild returns the hash of the file if it has changed since the last build
 // or nil if it hasn't changed.
-func needsRebuild(fp string) (h []byte, err error) {
+func needsRebuild(stepName string, fp string) (h []byte, err error) {
 	h, err = hashFile(fp)
 	if err != nil {
 		return nil, err
 	}
 
-	hStored, err := GetHash(fp)
+	hStored, err := GetHash(stepName, fp)
 	if err != nil {
 		return nil, err
 	}
