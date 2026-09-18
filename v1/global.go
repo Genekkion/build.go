@@ -128,13 +128,7 @@ func needsRebuild(fp string) (h []byte, err error) {
 		return nil, err
 	}
 
-	if hStored == nil {
-		err = SetHash(fp, h)
-		if err != nil {
-			return nil, err
-		}
-
-	} else if !slices.Equal(hStored, h) {
+	if hStored == nil || !slices.Equal(hStored, h) {
 		return h, nil
 	}
 	return nil, nil
