@@ -7,25 +7,23 @@ import (
 	buildgo "github.com/Genekkion/build.go/v1"
 	cmdgo "github.com/Genekkion/build.go/v1/commands/go"
 	"github.com/Genekkion/build.go/v1/commands/shell"
+	"github.com/Genekkion/build.go/v1/fpath"
 )
 
 func main() {
 	buildgo.Setup()
 	defer buildgo.Cleanup()
 
-	fp, err := filepath.Abs(".")
-	if err != nil {
-		panic(err)
-	}
+	dir := filepath.Dir(fpath.CurrentFilePath())
 
 	var firstStep *buildgo.Step
 	{
-		cmd, err := cmdgo.NewRunCmd(fp, []string{"read_file"}, nil)
+		cmd, err := cmdgo.NewRunCmd(dir, []string{"./read_file"}, nil)
 		if err != nil {
 			panic(err)
 		}
 		firstStep = buildgo.NewStep("First step", cmd)
-		firstStep.AddFileDeps("read_file/file.txt")
+		firstStep.AddFileDeps(filepath.Join(dir, "read_file", "file.txt"))
 	}
 
 	var second *buildgo.Step
@@ -39,7 +37,7 @@ func main() {
 		second.DependsOn(firstStep)
 	}
 
-	err = second.Run(context.Background())
+	err := second.Run(context.Background())
 	if err != nil {
 		panic(err)
 	}

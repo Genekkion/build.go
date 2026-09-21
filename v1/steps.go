@@ -15,6 +15,7 @@ type Step struct {
 	dependsOn        []*Step
 	fileDepsPatterns []string
 	done             atomic.Bool
+	rebuilt          atomic.Bool
 }
 
 // NewStep creates a new step.
@@ -56,8 +57,8 @@ func (s *Step) AddFileDeps(patterns ...string) *Step {
 
 // SetFileDeps sets the file dependencies.
 func (s *Step) SetFileDeps(patterns []string) *Step {
-	s.fileDepsPatterns = patterns
-	return s
+	s.fileDepsPatterns = nil
+	return s.AddFileDeps(patterns...)
 }
 
 // FileDeps returns the file dependencies.
@@ -80,6 +81,11 @@ func (s *Step) Done() bool {
 	return s.done.Load()
 }
 
+// Rebuilt returns whether the step ran its commands during the current build execution.
+func (s *Step) Rebuilt() bool {
+	return s.rebuilt.Load()
+}
+
 // needsRebuild returns nil if the step can be skipped, or a map of files which
 // hashes are to be updated after the step is run.
 func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
@@ -94,10 +100,17 @@ func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
 			return nil, err
 		}
 
-		Logger.Debug("Files matched",
-			"pattern", fileDep,
-			"files", files,
-		)
+		if len(files) == 0 {
+			Logger.Warn("No files matched dependency pattern",
+				"pattern", fileDep,
+				"step", s.name,
+			)
+		} else {
+			Logger.Debug("Files matched",
+				"pattern", fileDep,
+				"files", files,
+			)
+		}
 
 		for _, fp := range files {
 			h, err := needsRebuild(s.name, fp)
@@ -161,22 +174,27 @@ func (s *Step) Run(ctx context.Context) error {
 	if err := s.CheckCycles(); err != nil {
 		return err
 	}
-	return s.run(ctx)
+	_, err := s.run(ctx)
+	return err
 }
 
-func (s *Step) run(ctx context.Context) (err error) {
+func (s *Step) run(ctx context.Context) (rebuilt bool, err error) {
 	if s.Done() {
-		return nil
+		return s.rebuilt.Load(), nil
 	}
 
+	var depRebuilt bool
 	for _, dep := range s.dependsOn {
-		if dep.Done() {
-			continue
-		}
-
-		err = dep.run(ctx)
-		if err != nil {
-			return err
+		if !dep.Done() {
+			r, err := dep.run(ctx)
+			if err != nil {
+				return false, err
+			}
+			if r {
+				depRebuilt = true
+			}
+		} else if dep.Rebuilt() {
+			depRebuilt = true
 		}
 	}
 
@@ -184,11 +202,11 @@ func (s *Step) run(ctx context.Context) (err error) {
 	if len(s.fileDepsPatterns) > 0 {
 		toSet, err = s.needsRebuild()
 		if err != nil {
-			return err
-		} else if len(toSet) == 0 {
+			return false, err
+		} else if len(toSet) == 0 && !depRebuilt {
 			Logger.Info("Skipping step", "step", s.name)
 			s.done.Store(true)
-			return nil
+			return false, nil
 		}
 	}
 
@@ -200,12 +218,13 @@ func (s *Step) run(ctx context.Context) (err error) {
 				"step", s.name,
 				"error", err,
 			)
-			return err
+			return false, err
 		}
 	}
 
 	Logger.Info("Step completed", "step", s.name)
 	s.done.Store(true)
+	s.rebuilt.Store(true)
 
 	for fp, h := range toSet {
 		err = SetHash(s.name, fp, h)
@@ -215,9 +234,9 @@ func (s *Step) run(ctx context.Context) (err error) {
 				"error", err,
 			)
 
-			return err
+			return false, err
 		}
 	}
 
-	return nil
+	return true, nil
 }

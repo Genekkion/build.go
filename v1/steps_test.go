@@ -316,4 +316,87 @@ func TestStepDiamondDependency(t *testing.T) {
 	}
 }
 
+func TestUpstreamRebuildPropagation(t *testing.T) {
+	memFS := setupTestEnv(t)
+
+	fileA := "/virtual/a.txt"
+	fileB := "/virtual/b.txt"
+	if err := memFS.WriteFile(fileA, []byte("a-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := memFS.WriteFile(fileB, []byte("b-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var runCountA, runCountB atomic.Int32
+	cmdA, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { runCountA.Add(1); return nil }})
+	cmdB, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { runCountB.Add(1); return nil }})
+
+	// 1. Initial build: both run
+	stepA := buildgo.NewStep("A", cmdA).AddFileDeps(fileA)
+	stepB := buildgo.NewStep("B", cmdB).AddFileDeps(fileB).DependsOn(stepA)
+
+	if err := stepB.Run(context.Background()); err != nil {
+		t.Fatalf("initial run failed: %v", err)
+	}
+	if runCountA.Load() != 1 || runCountB.Load() != 1 {
+		t.Fatalf("expected initial run counts A=1, B=1; got A=%d, B=%d", runCountA.Load(), runCountB.Load())
+	}
+
+	// 2. Second build without file changes: both skip
+	stepA2 := buildgo.NewStep("A", cmdA).AddFileDeps(fileA)
+	stepB2 := buildgo.NewStep("B", cmdB).AddFileDeps(fileB).DependsOn(stepA2)
+
+	if err := stepB2.Run(context.Background()); err != nil {
+		t.Fatalf("second run failed: %v", err)
+	}
+	if runCountA.Load() != 1 || runCountB.Load() != 1 {
+		t.Fatalf("expected both to skip; got A=%d, B=%d", runCountA.Load(), runCountB.Load())
+	}
+
+	// 3. Modify fileA only. fileB is NOT modified.
+	if err := memFS.WriteFile(fileA, []byte("a-v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stepA3 := buildgo.NewStep("A", cmdA).AddFileDeps(fileA)
+	stepB3 := buildgo.NewStep("B", cmdB).AddFileDeps(fileB).DependsOn(stepA3)
+
+	if err := stepB3.Run(context.Background()); err != nil {
+		t.Fatalf("third run failed: %v", err)
+	}
+	// stepB MUST rebuild because stepA rebuilt!
+	if runCountA.Load() != 2 {
+		t.Fatalf("expected stepA to rebuild (count 2), got %d", runCountA.Load())
+	}
+	if runCountB.Load() != 2 {
+		t.Fatalf("expected stepB to rebuild due to upstream rebuild (count 2), got %d", runCountB.Load())
+	}
+
+	// 4. Fourth build without changes: both skip again
+	stepA4 := buildgo.NewStep("A", cmdA).AddFileDeps(fileA)
+	stepB4 := buildgo.NewStep("B", cmdB).AddFileDeps(fileB).DependsOn(stepA4)
+
+	if err := stepB4.Run(context.Background()); err != nil {
+		t.Fatalf("fourth run failed: %v", err)
+	}
+	if runCountA.Load() != 2 || runCountB.Load() != 2 {
+		t.Fatalf("expected both to skip again; got A=%d, B=%d", runCountA.Load(), runCountB.Load())
+	}
+}
+
+func TestCleanupSafety(t *testing.T) {
+	// Calling Cleanup when uninitialized should not panic
+	buildgo.Cleanup()
+	buildgo.Cleanup()
+
+	// Calling Cleanup after Setup should cleanly close DB and reset FS
+	memFS := vfs.NewMemFS()
+	buildgo.Setup(buildgo.WithInMemoryDB(), buildgo.WithFS(memFS))
+	buildgo.Cleanup()
+	buildgo.Cleanup()
+}
+
+
+
 

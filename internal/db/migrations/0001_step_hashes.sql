@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS hashes;
 CREATE TABLE IF NOT EXISTS hashes
 (
     step_name TEXT NOT NULL,

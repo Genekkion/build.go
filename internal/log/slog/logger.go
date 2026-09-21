@@ -35,13 +35,12 @@ func (h *Handler) AddHandler(handler slog.Handler) {
 
 // Handle handles a log record.
 func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
+	if traceId, err := traceIdFromCtx(ctx); err == nil {
+		r.Add("traceId", traceId.String())
+	}
+
 	for _, sh := range h.subHandlers {
-		traceId, err := traceIdFromCtx(ctx)
-		if err == nil {
-			r.Add("traceId", traceId.String())
-		}
-		err = sh.Handle(ctx, r)
-		if err != nil {
+		if err := sh.Handle(ctx, r); err != nil {
 			return err
 		}
 	}
