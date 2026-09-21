@@ -5,15 +5,13 @@ import (
 	"os"
 )
 
-var (
-	// defaultLogger is the global logger used when no logger is provided.
-	defaultLogger = func() *slog.Logger {
-		handlers := []slog.Handler{
-			NewHandler(os.Stdout, nil),
-		}
-		return NewLogger(handlers...)
-	}()
-)
+// defaultLogger is the global logger used when no logger is provided.
+var defaultLogger = func() *slog.Logger {
+	handlers := []slog.Handler{
+		NewHandler(os.Stdout, nil),
+	}
+	return NewLogger(handlers...)
+}()
 
 // SetDefaultLogger sets the default logger.
 func SetDefaultLogger(logger *slog.Logger) {
