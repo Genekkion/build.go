@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"path/filepath"
 
 	buildgo "github.com/Genekkion/build.go/v1"
@@ -11,8 +10,8 @@ import (
 )
 
 func main() {
-	buildgo.Setup()
-	defer buildgo.Cleanup()
+	ctx := buildgo.Setup()
+	defer buildgo.Cleanup(ctx)
 
 	dir := filepath.Dir(fpath.CurrentFilePath())
 
@@ -37,7 +36,7 @@ func main() {
 		second.DependsOn(firstStep)
 	}
 
-	err := second.Run(context.Background())
+	err := second.Run(ctx)
 	if err != nil {
 		panic(err)
 	}

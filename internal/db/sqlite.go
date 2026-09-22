@@ -14,17 +14,10 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+const bootstrapMigration = "0000_migrations_table.sql"
+
 // Migrate applies any pending migrations from the embedded filesystem in sorted order.
 func Migrate(db *sql.DB) error {
-	// Ensure migration tracking table exists first
-	const initTable = `CREATE TABLE IF NOT EXISTS schema_migrations (
-		version TEXT PRIMARY KEY,
-		applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);`
-	if _, err := db.Exec(initTable); err != nil {
-		return fmt.Errorf("failed to initialize schema_migrations: %w", err)
-	}
-
 	entries, err := fs.ReadDir(migrationsFS, "migrations")
 	if err != nil {
 		return fmt.Errorf("failed to read migrations directory: %w", err)
@@ -37,6 +30,19 @@ func Migrate(db *sql.DB) error {
 		}
 	}
 	slices.Sort(files)
+
+	// Bootstrap: execute the migrations table DDL unconditionally (uses IF NOT EXISTS).
+	bootstrap, err := migrationsFS.ReadFile("migrations/" + bootstrapMigration)
+	if err != nil {
+		return fmt.Errorf("failed to read bootstrap migration: %w", err)
+	}
+	if _, err := db.Exec(string(bootstrap)); err != nil {
+		return fmt.Errorf("failed to execute bootstrap migration: %w", err)
+	}
+	// Record bootstrap as applied (idempotent via INSERT OR IGNORE).
+	if _, err := db.Exec("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", bootstrapMigration); err != nil {
+		return fmt.Errorf("failed to record bootstrap migration: %w", err)
+	}
 
 	rows, err := db.Query("SELECT version FROM schema_migrations")
 	if err != nil {

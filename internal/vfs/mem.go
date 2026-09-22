@@ -96,6 +96,11 @@ func (m *MemFS) Stat(name string) (fs.FileInfo, error) {
 	}, nil
 }
 
+// Abs returns the cleaned path without resolving against the real working directory.
+func (m *MemFS) Abs(path string) (string, error) {
+	return filepath.Clean(path), nil
+}
+
 // Glob returns the names of all files matching pattern.
 func (m *MemFS) Glob(pattern string) ([]string, error) {
 	m.mu.RLock()

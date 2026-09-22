@@ -11,6 +11,7 @@ type FS interface {
 	Open(name string) (io.ReadCloser, error)
 	Glob(pattern string) ([]string, error)
 	Stat(name string) (fs.FileInfo, error)
+	Abs(path string) (string, error)
 }
 
 // WritableFS extends FS with write operations for testing and mocking.

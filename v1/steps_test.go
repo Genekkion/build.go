@@ -12,21 +12,22 @@ import (
 	"github.com/Genekkion/build.go/v1/commands/inline"
 )
 
-func setupTestEnv(t *testing.T) *vfs.MemFS {
+func setupTestEnv(t *testing.T) (context.Context, *vfs.MemFS) {
 	t.Helper()
 	memFS := vfs.NewMemFS()
-	buildgo.Setup(
+	ctx := buildgo.Setup(
 		buildgo.WithInMemoryDB(),
 		buildgo.WithFS(memFS),
 	)
 	t.Cleanup(func() {
-		buildgo.Cleanup()
+		buildgo.Cleanup(ctx)
 	})
-	return memFS
+	return ctx, memFS
 }
 
 func TestStepRebuildLifecycle(t *testing.T) {
-	memFS := setupTestEnv(t)
+	t.Parallel()
+	ctx, memFS := setupTestEnv(t)
 
 	depFile := "/virtual/dep.txt"
 	if err := memFS.WriteFile(depFile, []byte("initial"), 0o644); err != nil {
@@ -45,7 +46,7 @@ func TestStepRebuildLifecycle(t *testing.T) {
 	}
 
 	step1 := buildgo.NewStep("build", mockCmd).AddFileDeps(depFile)
-	if err := step1.Run(context.Background()); err != nil {
+	if err := step1.Run(ctx); err != nil {
 		t.Fatalf("first run failed: %v", err)
 	}
 	if runCount.Load() != 1 {
@@ -53,7 +54,7 @@ func TestStepRebuildLifecycle(t *testing.T) {
 	}
 
 	step2 := buildgo.NewStep("build", mockCmd).AddFileDeps(depFile)
-	if err := step2.Run(context.Background()); err != nil {
+	if err := step2.Run(ctx); err != nil {
 		t.Fatalf("second run failed: %v", err)
 	}
 	if runCount.Load() != 1 {
@@ -65,7 +66,7 @@ func TestStepRebuildLifecycle(t *testing.T) {
 	}
 
 	step3 := buildgo.NewStep("build", mockCmd).AddFileDeps(depFile)
-	if err := step3.Run(context.Background()); err != nil {
+	if err := step3.Run(ctx); err != nil {
 		t.Fatalf("third run failed: %v", err)
 	}
 	if runCount.Load() != 2 {
@@ -74,7 +75,8 @@ func TestStepRebuildLifecycle(t *testing.T) {
 }
 
 func TestStepFailureDoesNotCacheHash(t *testing.T) {
-	memFS := setupTestEnv(t)
+	t.Parallel()
+	ctx, memFS := setupTestEnv(t)
 
 	depFile := "/virtual/fail_dep.txt"
 	if err := memFS.WriteFile(depFile, []byte("failure-content"), 0o644); err != nil {
@@ -98,9 +100,8 @@ func TestStepFailureDoesNotCacheHash(t *testing.T) {
 		t.Fatalf("failed to create command: %v", err)
 	}
 
-	// 1. First run fails
 	step1 := buildgo.NewStep("failStep", cmd).AddFileDeps(depFile)
-	err = step1.Run(context.Background())
+	err = step1.Run(ctx)
 	if err == nil {
 		t.Fatalf("expected step1 to return error, got nil")
 	}
@@ -108,10 +109,9 @@ func TestStepFailureDoesNotCacheHash(t *testing.T) {
 		t.Fatalf("expected 1 invocation, got %d", runCount.Load())
 	}
 
-	// 2. Second run without file changes must STILL attempt to run because step1 failed and did not cache
 	shouldFail.Store(false)
 	step2 := buildgo.NewStep("failStep", cmd).AddFileDeps(depFile)
-	err = step2.Run(context.Background())
+	err = step2.Run(ctx)
 	if err != nil {
 		t.Fatalf("expected step2 to succeed, got %v", err)
 	}
@@ -119,9 +119,8 @@ func TestStepFailureDoesNotCacheHash(t *testing.T) {
 		t.Fatalf("expected 2 invocations (retry succeeded), got %d", runCount.Load())
 	}
 
-	// 3. Third run without file changes must now skip since step2 succeeded and cached
 	step3 := buildgo.NewStep("failStep", cmd).AddFileDeps(depFile)
-	err = step3.Run(context.Background())
+	err = step3.Run(ctx)
 	if err != nil {
 		t.Fatalf("expected step3 to succeed, got %v", err)
 	}
@@ -131,7 +130,8 @@ func TestStepFailureDoesNotCacheHash(t *testing.T) {
 }
 
 func TestStepMultipleFileDeps(t *testing.T) {
-	memFS := setupTestEnv(t)
+	t.Parallel()
+	ctx, memFS := setupTestEnv(t)
 
 	f1 := "/virtual/file1.txt"
 	f2 := "/virtual/file2.txt"
@@ -153,22 +153,20 @@ func TestStepMultipleFileDeps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// First run
 	step1 := buildgo.NewStep("multi", cmd).AddFileDeps(f1, f2)
-	if err := step1.Run(context.Background()); err != nil {
+	if err := step1.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if runCount.Load() != 1 {
 		t.Fatalf("expected runCount 1, got %d", runCount.Load())
 	}
 
-	// Modify only one file
 	if err := memFS.WriteFile(f2, []byte("f2-v2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	step2 := buildgo.NewStep("multi", cmd).AddFileDeps(f1, f2)
-	if err := step2.Run(context.Background()); err != nil {
+	if err := step2.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if runCount.Load() != 2 {
@@ -177,7 +175,8 @@ func TestStepMultipleFileDeps(t *testing.T) {
 }
 
 func TestStepScopedCacheIsolation(t *testing.T) {
-	memFS := setupTestEnv(t)
+	t.Parallel()
+	ctx, memFS := setupTestEnv(t)
 
 	sharedFile := "/virtual/shared.txt"
 	if err := memFS.WriteFile(sharedFile, []byte("shared-v1"), 0o644); err != nil {
@@ -208,29 +207,26 @@ func TestStepScopedCacheIsolation(t *testing.T) {
 	stepA := buildgo.NewStep("stepA", cmdA).AddFileDeps(sharedFile)
 	stepB := buildgo.NewStep("stepB", cmdB).AddFileDeps(sharedFile)
 
-	// 1. Run stepA first
-	if err := stepA.Run(context.Background()); err != nil {
+	if err := stepA.Run(ctx); err != nil {
 		t.Fatalf("stepA run failed: %v", err)
 	}
 	if runCountA.Load() != 1 {
 		t.Fatalf("expected stepA runCount 1, got %d", runCountA.Load())
 	}
 
-	// 2. Run stepB: must run and NOT skip even though stepA cached sharedFile
-	if err := stepB.Run(context.Background()); err != nil {
+	if err := stepB.Run(ctx); err != nil {
 		t.Fatalf("stepB run failed: %v", err)
 	}
 	if runCountB.Load() != 1 {
 		t.Fatalf("expected stepB to run (not falsely skip due to stepA), got %d", runCountB.Load())
 	}
 
-	// 3. Re-running both without changes must skip both
 	stepA2 := buildgo.NewStep("stepA", cmdA).AddFileDeps(sharedFile)
 	stepB2 := buildgo.NewStep("stepB", cmdB).AddFileDeps(sharedFile)
-	if err := stepA2.Run(context.Background()); err != nil {
+	if err := stepA2.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := stepB2.Run(context.Background()); err != nil {
+	if err := stepB2.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if runCountA.Load() != 1 || runCountB.Load() != 1 {
@@ -239,7 +235,8 @@ func TestStepScopedCacheIsolation(t *testing.T) {
 }
 
 func TestStepCycleDetection(t *testing.T) {
-	setupTestEnv(t)
+	t.Parallel()
+	ctx, _ := setupTestEnv(t)
 
 	noop, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { return nil }})
 
@@ -247,7 +244,7 @@ func TestStepCycleDetection(t *testing.T) {
 		stepA := buildgo.NewStep("A", noop)
 		stepA.DependsOn(stepA)
 
-		err := stepA.Run(context.Background())
+		err := stepA.Run(ctx)
 		if err == nil {
 			t.Fatal("expected cycle error, got nil")
 		}
@@ -262,7 +259,7 @@ func TestStepCycleDetection(t *testing.T) {
 		stepA.DependsOn(stepB)
 		stepB.DependsOn(stepA)
 
-		err := stepA.Run(context.Background())
+		err := stepA.Run(ctx)
 		if err == nil {
 			t.Fatal("expected cycle error, got nil")
 		}
@@ -279,7 +276,7 @@ func TestStepCycleDetection(t *testing.T) {
 		stepB.DependsOn(stepC)
 		stepC.DependsOn(stepA)
 
-		err := stepA.Run(context.Background())
+		err := stepA.Run(ctx)
 		if err == nil {
 			t.Fatal("expected cycle error, got nil")
 		}
@@ -290,7 +287,8 @@ func TestStepCycleDetection(t *testing.T) {
 }
 
 func TestStepDiamondDependency(t *testing.T) {
-	setupTestEnv(t)
+	t.Parallel()
+	ctx, _ := setupTestEnv(t)
 
 	var runCountA, runCountB, runCountC, runCountD atomic.Int32
 
@@ -304,12 +302,11 @@ func TestStepDiamondDependency(t *testing.T) {
 	stepC := buildgo.NewStep("C", cmdC).DependsOn(stepA)
 	stepD := buildgo.NewStep("D", cmdD).DependsOn(stepB, stepC)
 
-	err := stepD.Run(context.Background())
+	err := stepD.Run(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error in diamond dependency: %v", err)
 	}
 
-	// Each step should run exactly once
 	if runCountA.Load() != 1 || runCountB.Load() != 1 || runCountC.Load() != 1 || runCountD.Load() != 1 {
 		t.Fatalf("expected each step to run once, got A=%d, B=%d, C=%d, D=%d",
 			runCountA.Load(), runCountB.Load(), runCountC.Load(), runCountD.Load())
@@ -317,7 +314,8 @@ func TestStepDiamondDependency(t *testing.T) {
 }
 
 func TestUpstreamRebuildPropagation(t *testing.T) {
-	memFS := setupTestEnv(t)
+	t.Parallel()
+	ctx, memFS := setupTestEnv(t)
 
 	fileA := "/virtual/a.txt"
 	fileB := "/virtual/b.txt"
@@ -332,29 +330,26 @@ func TestUpstreamRebuildPropagation(t *testing.T) {
 	cmdA, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { runCountA.Add(1); return nil }})
 	cmdB, _ := inline.NewCmd([]inline.CmdFunc{func(ctx context.Context) error { runCountB.Add(1); return nil }})
 
-	// 1. Initial build: both run
 	stepA := buildgo.NewStep("A", cmdA).AddFileDeps(fileA)
 	stepB := buildgo.NewStep("B", cmdB).AddFileDeps(fileB).DependsOn(stepA)
 
-	if err := stepB.Run(context.Background()); err != nil {
+	if err := stepB.Run(ctx); err != nil {
 		t.Fatalf("initial run failed: %v", err)
 	}
 	if runCountA.Load() != 1 || runCountB.Load() != 1 {
 		t.Fatalf("expected initial run counts A=1, B=1; got A=%d, B=%d", runCountA.Load(), runCountB.Load())
 	}
 
-	// 2. Second build without file changes: both skip
 	stepA2 := buildgo.NewStep("A", cmdA).AddFileDeps(fileA)
 	stepB2 := buildgo.NewStep("B", cmdB).AddFileDeps(fileB).DependsOn(stepA2)
 
-	if err := stepB2.Run(context.Background()); err != nil {
+	if err := stepB2.Run(ctx); err != nil {
 		t.Fatalf("second run failed: %v", err)
 	}
 	if runCountA.Load() != 1 || runCountB.Load() != 1 {
 		t.Fatalf("expected both to skip; got A=%d, B=%d", runCountA.Load(), runCountB.Load())
 	}
 
-	// 3. Modify fileA only. fileB is NOT modified.
 	if err := memFS.WriteFile(fileA, []byte("a-v2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -362,10 +357,9 @@ func TestUpstreamRebuildPropagation(t *testing.T) {
 	stepA3 := buildgo.NewStep("A", cmdA).AddFileDeps(fileA)
 	stepB3 := buildgo.NewStep("B", cmdB).AddFileDeps(fileB).DependsOn(stepA3)
 
-	if err := stepB3.Run(context.Background()); err != nil {
+	if err := stepB3.Run(ctx); err != nil {
 		t.Fatalf("third run failed: %v", err)
 	}
-	// stepB MUST rebuild because stepA rebuilt!
 	if runCountA.Load() != 2 {
 		t.Fatalf("expected stepA to rebuild (count 2), got %d", runCountA.Load())
 	}
@@ -373,11 +367,10 @@ func TestUpstreamRebuildPropagation(t *testing.T) {
 		t.Fatalf("expected stepB to rebuild due to upstream rebuild (count 2), got %d", runCountB.Load())
 	}
 
-	// 4. Fourth build without changes: both skip again
 	stepA4 := buildgo.NewStep("A", cmdA).AddFileDeps(fileA)
 	stepB4 := buildgo.NewStep("B", cmdB).AddFileDeps(fileB).DependsOn(stepA4)
 
-	if err := stepB4.Run(context.Background()); err != nil {
+	if err := stepB4.Run(ctx); err != nil {
 		t.Fatalf("fourth run failed: %v", err)
 	}
 	if runCountA.Load() != 2 || runCountB.Load() != 2 {
@@ -386,17 +379,13 @@ func TestUpstreamRebuildPropagation(t *testing.T) {
 }
 
 func TestCleanupSafety(t *testing.T) {
-	// Calling Cleanup when uninitialized should not panic
-	buildgo.Cleanup()
-	buildgo.Cleanup()
+	t.Parallel()
+	// Calling Cleanup with a context that has no DB should not panic
+	buildgo.Cleanup(context.Background())
+	buildgo.Cleanup(context.Background())
 
-	// Calling Cleanup after Setup should cleanly close DB and reset FS
+	// Calling Cleanup after Setup should cleanly close DB
 	memFS := vfs.NewMemFS()
-	buildgo.Setup(buildgo.WithInMemoryDB(), buildgo.WithFS(memFS))
-	buildgo.Cleanup()
-	buildgo.Cleanup()
+	ctx := buildgo.Setup(buildgo.WithInMemoryDB(), buildgo.WithFS(memFS))
+	buildgo.Cleanup(ctx)
 }
-
-
-
-

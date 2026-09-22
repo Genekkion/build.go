@@ -3,9 +3,10 @@ package buildgo
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
+
+	"github.com/Genekkion/build.go/internal/vfs"
 )
 
 // Step represents a single build step.
@@ -36,22 +37,10 @@ func (s *Step) DependsOn(steps ...*Step) *Step {
 	return s
 }
 
-// AddFileDeps adds file dependencies.
+// AddFileDeps adds file dependency patterns. Patterns are stored as-is
+// and resolved against the context's filesystem at build time.
 func (s *Step) AddFileDeps(patterns ...string) *Step {
-	p := make([]string, len(patterns))
-	var err error
-	for i := range patterns {
-		p[i], err = filepath.Abs(patterns[i])
-		if err != nil {
-			Logger.Warn("Unable to resolve file pattern, defaulting to relative path",
-				"pattern", patterns[i],
-				"error", err,
-			)
-			p[i] = patterns[i]
-		}
-	}
-	Logger.Debug("Adding file dependencies", "patterns", p)
-	s.fileDepsPatterns = append(s.fileDepsPatterns, p...)
+	s.fileDepsPatterns = append(s.fileDepsPatterns, patterns...)
 	return s
 }
 
@@ -86,16 +75,40 @@ func (s *Step) Rebuilt() bool {
 	return s.rebuilt.Load()
 }
 
+// resolvePatterns resolves raw patterns to absolute paths using the context's filesystem.
+func (s *Step) resolvePatterns(ctx context.Context) ([]string, error) {
+	fs := vfs.FSFromCtx(ctx)
+	resolved := make([]string, len(s.fileDepsPatterns))
+	for i, p := range s.fileDepsPatterns {
+		abs, err := fs.Abs(p)
+		if err != nil {
+			Logger.Warn("Unable to resolve file pattern, defaulting to raw path",
+				"pattern", p,
+				"error", err,
+			)
+			abs = p
+		}
+		resolved[i] = abs
+	}
+	return resolved, nil
+}
+
 // needsRebuild returns nil if the step can be skipped, or a map of files which
 // hashes are to be updated after the step is run.
-func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
+func (s *Step) needsRebuild(ctx context.Context) (toSet map[string][]byte, err error) {
 	toSet = map[string][]byte{}
-	if len(s.fileDepsPatterns) == 0 {
+
+	patterns, err := s.resolvePatterns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(patterns) == 0 {
 		return nil, nil
 	}
 
-	for _, fileDep := range s.fileDepsPatterns {
-		files, err := CurrentFS.Glob(fileDep)
+	fs := vfs.FSFromCtx(ctx)
+	for _, fileDep := range patterns {
+		files, err := fs.Glob(fileDep)
 		if err != nil {
 			return nil, err
 		}
@@ -113,7 +126,7 @@ func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
 		}
 
 		for _, fp := range files {
-			h, err := needsRebuild(s.name, fp)
+			h, err := needsRebuild(ctx, s.name, fp)
 			if err != nil {
 				return nil, err
 			}
@@ -200,7 +213,7 @@ func (s *Step) run(ctx context.Context) (rebuilt bool, err error) {
 
 	var toSet map[string][]byte
 	if len(s.fileDepsPatterns) > 0 {
-		toSet, err = s.needsRebuild()
+		toSet, err = s.needsRebuild(ctx)
 		if err != nil {
 			return false, err
 		} else if len(toSet) == 0 && !depRebuilt {
@@ -227,7 +240,7 @@ func (s *Step) run(ctx context.Context) (rebuilt bool, err error) {
 	s.rebuilt.Store(true)
 
 	for fp, h := range toSet {
-		err = SetHash(s.name, fp, h)
+		err = setHash(ctx, s.name, fp, h)
 		if err != nil {
 			Logger.Error("Unable to update cache for file",
 				"file", fp,

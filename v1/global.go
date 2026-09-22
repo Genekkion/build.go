@@ -1,9 +1,11 @@
 package buildgo
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"hash"
 	"io"
 	slog2 "log/slog"
 	"os"
@@ -24,18 +26,29 @@ var (
 			}),
 		)
 	}()
-	CacheDir     string
-	CacheDb      *sql.DB
-	Hasher       = sha256.New
-	CurrentFS    vfs.FS = vfs.NewOSFS()
 	memDBCounter atomic.Int64
 )
+
+type ctxKeyHasher struct{}
+
+func WithHasher(ctx context.Context, h func() hash.Hash) context.Context {
+	return context.WithValue(ctx, ctxKeyHasher{}, h)
+}
+
+func HasherFromCtx(ctx context.Context) func() hash.Hash {
+	if h, ok := ctx.Value(ctxKeyHasher{}).(func() hash.Hash); ok {
+		return h
+	}
+	return sha256.New
+}
 
 type setupConfig struct {
 	inMemory bool
 	db       *sql.DB
 	cacheDir string
 	fs       vfs.FS
+	logger   *slog2.Logger
+	hasher   func() hash.Hash
 }
 
 // SetupOption configures the build system during Setup.
@@ -69,50 +82,67 @@ func WithFS(fileSystem vfs.FS) SetupOption {
 	}
 }
 
-// Setup sets up the global variables and database.
+// WithLogger overrides the logger injected into the build context.
+func WithLogger(l *slog2.Logger) SetupOption {
+	return func(c *setupConfig) {
+		c.logger = l
+	}
+}
+
+// Setup creates a build context with all infrastructure injected.
 // Warning: will panic if unable to set up successfully.
-func Setup(opts ...SetupOption) {
+func Setup(opts ...SetupOption) context.Context {
 	cfg := setupConfig{
-		fs: vfs.NewOSFS(),
+		fs:     vfs.NewOSFS(),
+		hasher: sha256.New,
 	}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
-	CurrentFS = cfg.fs
+	ctx := context.Background()
+	ctx = vfs.WithFS(ctx, cfg.fs)
 
-	var err error
+	if cfg.hasher != nil {
+		ctx = WithHasher(ctx, cfg.hasher)
+	}
+	if cfg.logger != nil {
+		ctx = slog.WithLogger(ctx, cfg.logger)
+	}
+
+	var (
+		database *sql.DB
+		err      error
+	)
 	if cfg.db != nil {
-		CacheDb = cfg.db
+		database = cfg.db
 	} else if cfg.inMemory {
 		dbName := fmt.Sprintf("file:buildgo_mem_%d?mode=memory&cache=shared", memDBCounter.Add(1))
-		CacheDb, err = db.New(dbName)
+		database, err = db.New(dbName)
 		if err != nil {
 			panic(err)
 		}
 	} else {
-		err = setupCache(cfg.cacheDir)
+		database, err = setupCache(cfg.cacheDir)
 		if err != nil {
 			panic(err)
 		}
 	}
+	ctx = db.WithDB(ctx, database)
 
-	Logger.Debug("Setup complete",
-		"cacheDir", CacheDir,
-	)
+	Logger.Debug("Setup complete")
+	return ctx
 }
 
-// Cleanup cleans up the global database connection.
-func Cleanup() {
-	if CacheDb != nil {
-		_ = CacheDb.Close()
-		CacheDb = nil
+// Cleanup closes the database connection held in the context.
+func Cleanup(ctx context.Context) {
+	if database := db.DBFromCtx(ctx); database != nil {
+		_ = database.Close()
 	}
-	CurrentFS = vfs.NewOSFS()
 }
 
-// setupCache sets up the cache directory and database.
-func setupCache(customDir string) (err error) {
+// setupCache sets up the cache directory and database, returns the opened DB.
+func setupCache(customDir string) (*sql.DB, error) {
 	fp := customDir
 	if fp == "" {
 		fp = filepath.Join(".", ".gobuild")
@@ -128,42 +158,31 @@ func setupCache(customDir string) (err error) {
 
 	Logger.Debug("Using cache directory", "dir", fp)
 
-	CacheDir = fp
-
 	err = os.MkdirAll(fp, 0o755)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	CacheDb, err = db.New(filepath.Join(fp, "cache.db"))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return db.New(filepath.Join(fp, "cache.db"))
 }
 
-// GetHash returns the hash for the given step name and file path.
-func GetHash(stepName string, fp string) (h []byte, err error) {
-	return db.GetHash(CacheDb, stepName, fp)
+func getHash(ctx context.Context, stepName string, fp string) (h []byte, err error) {
+	return db.GetHash(db.DBFromCtx(ctx), stepName, fp)
 }
 
-// SetHash sets the hash for the given step name and file path.
-func SetHash(stepName string, fp string, h []byte) (err error) {
-	return db.SetHash(CacheDb, stepName, fp, h)
+func setHash(ctx context.Context, stepName string, fp string, h []byte) error {
+	return db.SetHash(db.DBFromCtx(ctx), stepName, fp, h)
 }
 
-// hashFile returns the hash of the file contents
-func hashFile(fp string) (h []byte, err error) {
-	hs := Hasher()
+func hashFile(ctx context.Context, fp string) (h []byte, err error) {
+	hs := HasherFromCtx(ctx)()
 
-	f, err := CurrentFS.Open(fp)
+	f, err := vfs.FSFromCtx(ctx).Open(fp)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	// 32KB buffer
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := f.Read(buf)
@@ -183,15 +202,13 @@ func hashFile(fp string) (h []byte, err error) {
 	return hs.Sum(nil), nil
 }
 
-// needsRebuild returns the hash of the file if it has changed since the last build
-// or nil if it hasn't changed.
-func needsRebuild(stepName string, fp string) (h []byte, err error) {
-	h, err = hashFile(fp)
+func needsRebuild(ctx context.Context, stepName string, fp string) (h []byte, err error) {
+	h, err = hashFile(ctx, fp)
 	if err != nil {
 		return nil, err
 	}
 
-	hStored, err := GetHash(stepName, fp)
+	hStored, err := getHash(ctx, stepName, fp)
 	if err != nil {
 		return nil, err
 	}

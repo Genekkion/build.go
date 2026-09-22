@@ -29,3 +29,8 @@ func (o *OSFS) Glob(pattern string) ([]string, error) {
 func (o *OSFS) Stat(name string) (fs.FileInfo, error) {
 	return os.Stat(name)
 }
+
+// Abs returns the absolute path on the host filesystem.
+func (o *OSFS) Abs(path string) (string, error) {
+	return filepath.Abs(path)
+}
