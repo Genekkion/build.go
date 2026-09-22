@@ -2,8 +2,11 @@ package buildgo
 
 import (
 	"context"
-	"path/filepath"
+	"fmt"
+	"strings"
 	"sync/atomic"
+
+	"github.com/Genekkion/build.go/internal/vfs"
 )
 
 // Step represents a single build step.
@@ -13,6 +16,7 @@ type Step struct {
 	dependsOn        []*Step
 	fileDepsPatterns []string
 	done             atomic.Bool
+	rebuilt          atomic.Bool
 }
 
 // NewStep creates a new step.
@@ -33,29 +37,17 @@ func (s *Step) DependsOn(steps ...*Step) *Step {
 	return s
 }
 
-// AddFileDeps adds file dependencies.
+// AddFileDeps adds file dependency patterns. Patterns are stored as-is
+// and resolved against the context's filesystem at build time.
 func (s *Step) AddFileDeps(patterns ...string) *Step {
-	p := make([]string, len(patterns))
-	var err error
-	for i := range patterns {
-		p[i], err = filepath.Abs(patterns[i])
-		if err != nil {
-			Logger.Warn("Unable to resolve file pattern, defaulting to relative path",
-				"pattern", patterns[i],
-				"error", err,
-			)
-			p[i] = patterns[i]
-		}
-	}
-	Logger.Debug("Adding file dependencies", "patterns", p)
-	s.fileDepsPatterns = append(s.fileDepsPatterns, p...)
+	s.fileDepsPatterns = append(s.fileDepsPatterns, patterns...)
 	return s
 }
 
 // SetFileDeps sets the file dependencies.
 func (s *Step) SetFileDeps(patterns []string) *Step {
-	s.fileDepsPatterns = patterns
-	return s
+	s.fileDepsPatterns = nil
+	return s.AddFileDeps(patterns...)
 }
 
 // FileDeps returns the file dependencies.
@@ -78,27 +70,63 @@ func (s *Step) Done() bool {
 	return s.done.Load()
 }
 
+// Rebuilt returns whether the step ran its commands during the current build execution.
+func (s *Step) Rebuilt() bool {
+	return s.rebuilt.Load()
+}
+
+// resolvePatterns resolves raw patterns to absolute paths using the context's filesystem.
+func (s *Step) resolvePatterns(ctx context.Context) ([]string, error) {
+	fs := vfs.FSFromCtx(ctx)
+	resolved := make([]string, len(s.fileDepsPatterns))
+	for i, p := range s.fileDepsPatterns {
+		abs, err := fs.Abs(p)
+		if err != nil {
+			Logger.Warn("Unable to resolve file pattern, defaulting to raw path",
+				"pattern", p,
+				"error", err,
+			)
+			abs = p
+		}
+		resolved[i] = abs
+	}
+	return resolved, nil
+}
+
 // needsRebuild returns nil if the step can be skipped, or a map of files which
 // hashes are to be updated after the step is run.
-func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
+func (s *Step) needsRebuild(ctx context.Context) (toSet map[string][]byte, err error) {
 	toSet = map[string][]byte{}
-	if len(s.fileDepsPatterns) == 0 {
+
+	patterns, err := s.resolvePatterns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(patterns) == 0 {
 		return nil, nil
 	}
 
-	for _, fileDep := range s.fileDepsPatterns {
-		files, err := filepath.Glob(fileDep)
+	fs := vfs.FSFromCtx(ctx)
+	for _, fileDep := range patterns {
+		files, err := fs.Glob(fileDep)
 		if err != nil {
 			return nil, err
 		}
 
-		Logger.Debug("Files matched",
-			"pattern", fileDep,
-			"files", files,
-		)
+		if len(files) == 0 {
+			Logger.Warn("No files matched dependency pattern",
+				"pattern", fileDep,
+				"step", s.name,
+			)
+		} else {
+			Logger.Debug("Files matched",
+				"pattern", fileDep,
+				"files", files,
+			)
+		}
 
 		for _, fp := range files {
-			h, err := needsRebuild(fp)
+			h, err := needsRebuild(ctx, s.name, fp)
 			if err != nil {
 				return nil, err
 			}
@@ -108,36 +136,90 @@ func (s *Step) needsRebuild() (toSet map[string][]byte, err error) {
 		}
 	}
 
-	s.done.Store(len(toSet) == 0)
 	return toSet, nil
 }
 
-// Run runs the step.
-func (s *Step) Run(ctx context.Context) (err error) {
-	if s.Done() {
+// CheckCycles verifies that there are no circular dependencies reachable from this step.
+func (s *Step) CheckCycles() error {
+	state := make(map[*Step]int) // 0: unvisited, 1: visiting, 2: visited
+	var path []*Step
+
+	var dfs func(curr *Step) error
+	dfs = func(curr *Step) error {
+		switch state[curr] {
+		case 1:
+			cycleStart := 0
+			for i, node := range path {
+				if node == curr {
+					cycleStart = i
+					break
+				}
+			}
+			var cycleNames []string
+			for _, node := range path[cycleStart:] {
+				cycleNames = append(cycleNames, node.name)
+			}
+			cycleNames = append(cycleNames, curr.name)
+			return fmt.Errorf("dependency cycle detected: %s", strings.Join(cycleNames, " -> "))
+		case 2:
+			return nil
+		}
+
+		state[curr] = 1
+		path = append(path, curr)
+
+		for _, dep := range curr.dependsOn {
+			if err := dfs(dep); err != nil {
+				return err
+			}
+		}
+
+		path = path[:len(path)-1]
+		state[curr] = 2
 		return nil
 	}
 
-	for _, dep := range s.dependsOn {
-		if dep.Done() {
-			continue
-		}
+	return dfs(s)
+}
 
-		err = dep.Run(ctx)
-		if err != nil {
-			return err
+// Run runs the step and all its dependencies after verifying the graph has no cycles.
+func (s *Step) Run(ctx context.Context) error {
+	if err := s.CheckCycles(); err != nil {
+		return err
+	}
+	_, err := s.run(ctx)
+	return err
+}
+
+func (s *Step) run(ctx context.Context) (rebuilt bool, err error) {
+	if s.Done() {
+		return s.rebuilt.Load(), nil
+	}
+
+	var depRebuilt bool
+	for _, dep := range s.dependsOn {
+		if !dep.Done() {
+			r, err := dep.run(ctx)
+			if err != nil {
+				return false, err
+			}
+			if r {
+				depRebuilt = true
+			}
+		} else if dep.Rebuilt() {
+			depRebuilt = true
 		}
 	}
 
 	var toSet map[string][]byte
 	if len(s.fileDepsPatterns) > 0 {
-		toSet, err = s.needsRebuild()
+		toSet, err = s.needsRebuild(ctx)
 		if err != nil {
-			return err
-		} else if len(toSet) == 0 {
+			return false, err
+		} else if len(toSet) == 0 && !depRebuilt {
 			Logger.Info("Skipping step", "step", s.name)
 			s.done.Store(true)
-			return nil
+			return false, nil
 		}
 	}
 
@@ -149,24 +231,25 @@ func (s *Step) Run(ctx context.Context) (err error) {
 				"step", s.name,
 				"error", err,
 			)
-			return err
+			return false, err
 		}
 	}
 
 	Logger.Info("Step completed", "step", s.name)
 	s.done.Store(true)
+	s.rebuilt.Store(true)
 
 	for fp, h := range toSet {
-		err = SetHash(fp, h)
+		err = setHash(ctx, s.name, fp, h)
 		if err != nil {
 			Logger.Error("Unable to update cache for file",
 				"file", fp,
 				"error", err,
 			)
 
-			return err
+			return false, err
 		}
 	}
 
-	return nil
+	return true, nil
 }

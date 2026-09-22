@@ -2,6 +2,8 @@ package cmdgo
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 
 	buildgo "github.com/Genekkion/build.go/v1"
@@ -10,6 +12,8 @@ import (
 // Config represents the configuration.
 type Config struct {
 	compilerPath string
+	stdout       io.Writer
+	stderr       io.Writer
 }
 
 // defaultConfig returns the default configuration.
@@ -28,6 +32,8 @@ func defaultConfig() Config {
 
 	return Config{
 		compilerPath: compilerPath,
+		stdout:       os.Stdout,
+		stderr:       os.Stderr,
 	}
 }
 
@@ -38,5 +44,19 @@ type Option func(*Config)
 func WithCompilerPath(path string) Option {
 	return func(cfg *Config) {
 		cfg.compilerPath = path
+	}
+}
+
+// WithStdout sets the stdout writer.
+func WithStdout(stdout io.Writer) Option {
+	return func(cfg *Config) {
+		cfg.stdout = stdout
+	}
+}
+
+// WithStderr sets the stderr writer.
+func WithStderr(stderr io.Writer) Option {
+	return func(cfg *Config) {
+		cfg.stderr = stderr
 	}
 }

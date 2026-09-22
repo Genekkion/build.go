@@ -5,25 +5,13 @@ import (
 	"os"
 )
 
-var (
-	// defaultLoggerCleanups are functions to be called when the default logger is cleaned up.
-	defaultLoggerCleanups []func()
-
-	// defaultLogger is the "global" logger used when no logger is provided.
-	defaultLogger = func() *slog.Logger {
-		handlers := []slog.Handler{
-			NewHandler(os.Stdout, nil),
-		}
-		return NewLogger(handlers...)
-	}()
-)
-
-// CleanupDefaultLogger cleans up the default logger.
-func CleanupDefaultLogger() {
-	for _, f := range defaultLoggerCleanups {
-		f()
+// defaultLogger is the global logger used when no logger is provided.
+var defaultLogger = func() *slog.Logger {
+	handlers := []slog.Handler{
+		NewHandler(os.Stdout, nil),
 	}
-}
+	return NewLogger(handlers...)
+}()
 
 // SetDefaultLogger sets the default logger.
 func SetDefaultLogger(logger *slog.Logger) {

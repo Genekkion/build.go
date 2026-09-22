@@ -2,35 +2,108 @@ package db
 
 import (
 	"database/sql"
-
-	_ "embed"
+	"embed"
+	"fmt"
+	"io/fs"
+	"slices"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-//go:embed schema.sql
-var schemaSQL string
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
 
-// New creates a new sqlite database at the given path.
+const bootstrapMigration = "0000_migrations_table.sql"
+
+// Migrate applies any pending migrations from the embedded filesystem in sorted order.
+func Migrate(db *sql.DB) error {
+	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to read migrations directory: %w", err)
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
+			files = append(files, entry.Name())
+		}
+	}
+	slices.Sort(files)
+
+	// Bootstrap: execute the migrations table DDL unconditionally (uses IF NOT EXISTS).
+	bootstrap, err := migrationsFS.ReadFile("migrations/" + bootstrapMigration)
+	if err != nil {
+		return fmt.Errorf("failed to read bootstrap migration: %w", err)
+	}
+	if _, err := db.Exec(string(bootstrap)); err != nil {
+		return fmt.Errorf("failed to execute bootstrap migration: %w", err)
+	}
+	// Record bootstrap as applied (idempotent via INSERT OR IGNORE).
+	if _, err := db.Exec("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", bootstrapMigration); err != nil {
+		return fmt.Errorf("failed to record bootstrap migration: %w", err)
+	}
+
+	rows, err := db.Query("SELECT version FROM schema_migrations")
+	if err != nil {
+		return fmt.Errorf("failed to query applied migrations: %w", err)
+	}
+	defer rows.Close()
+
+	applied := make(map[string]struct{})
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return fmt.Errorf("failed to scan migration version: %w", err)
+		}
+		applied[v] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error reading applied migrations: %w", err)
+	}
+
+	for _, file := range files {
+		if _, ok := applied[file]; ok {
+			continue
+		}
+
+		content, err := migrationsFS.ReadFile("migrations/" + file)
+		if err != nil {
+			return fmt.Errorf("failed to read migration file %s: %w", file, err)
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("failed to start migration transaction: %w", err)
+		}
+
+		if _, err := tx.Exec(string(content)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("failed to execute migration %s: %w", file, err)
+		}
+
+		if _, err := tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", file); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("failed to record migration %s: %w", file, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit migration %s: %w", file, err)
+		}
+	}
+
+	return nil
+}
+
+// New creates a new sqlite database at the given path and runs pending migrations.
 func New(fp string) (db *sql.DB, err error) {
 	db, err = sql.Open("sqlite3", fp)
 	if err != nil {
 		return nil, err
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec(schemaSQL)
-	if err != nil {
-		return nil, err
-	}
-
-	err = tx.Commit()
-	if err != nil {
+	if err := Migrate(db); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 
